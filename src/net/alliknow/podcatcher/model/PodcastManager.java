@@ -1,4 +1,4 @@
-/** Copyright 2012-2014 Kevin Hausmann
+/** Copyright 2012, 2013 Kevin Hausmann
  *
  * This file is part of PodCatcher Deluxe.
  *
@@ -15,31 +15,31 @@
  * along with PodCatcher Deluxe. If not, see <http://www.gnu.org/licenses/>.
  */
 
-package net.alliknow.podcatcher.model;
+package net.alliknow.model;
 
 import android.annotation.TargetApi;
 import android.content.Context;
-import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.UserManager;
 import android.preference.PreferenceManager;
+import android.util.Log;
 
-import net.alliknow.podcatcher.GetRestrictionsReceiver;
-import net.alliknow.podcatcher.Podcatcher;
-import net.alliknow.podcatcher.SettingsActivity;
-import net.alliknow.podcatcher.listeners.OnChangePodcastListListener;
-import net.alliknow.podcatcher.listeners.OnLoadPodcastListListener;
-import net.alliknow.podcatcher.listeners.OnLoadPodcastListener;
-import net.alliknow.podcatcher.listeners.OnLoadPodcastLogoListener;
-import net.alliknow.podcatcher.model.tasks.StorePodcastListTask;
-import net.alliknow.podcatcher.model.tasks.remote.LoadPodcastLogoTask;
-import net.alliknow.podcatcher.model.tasks.remote.LoadPodcastTask;
-import net.alliknow.podcatcher.model.tasks.remote.LoadPodcastTask.PodcastLoadError;
-import net.alliknow.podcatcher.model.types.Episode;
-import net.alliknow.podcatcher.model.types.Podcast;
-import net.alliknow.podcatcher.model.types.Progress;
+import net.alliknow.GetRestrictionsReceiver;
+import net.alliknow.Podcatcher;
+import net.alliknow.SettingsActivity;
+import net.alliknow.listeners.OnChangePodcastListListener;
+import net.alliknow.listeners.OnLoadPodcastListListener;
+import net.alliknow.listeners.OnLoadPodcastListener;
+import net.alliknow.listeners.OnLoadPodcastLogoListener;
+import net.alliknow.model.tasks.StorePodcastListTask;
+import net.alliknow.model.tasks.remote.LoadPodcastLogoTask;
+import net.alliknow.model.tasks.remote.LoadPodcastTask;
+import net.alliknow.model.tasks.remote.LoadPodcastTask.PodcastLoadError;
+import net.alliknow.model.types.Episode;
+import net.alliknow.model.types.Podcast;
+import net.alliknow.model.types.Progress;
 
 import org.xmlpull.v1.XmlPullParser;
 
@@ -107,24 +107,26 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     private boolean blockExplicit = false;
 
     /** The current podcast load tasks */
-    private Map<Podcast, LoadPodcastTask> loadPodcastTasks = new HashMap<>();
+    private Map<Podcast, LoadPodcastTask> loadPodcastTasks = new HashMap<Podcast, LoadPodcastTask>();
     /** The current podcast logo load tasks */
-    private Map<Podcast, LoadPodcastLogoTask> loadPodcastLogoTasks = new HashMap<>();
+    private Map<Podcast, LoadPodcastLogoTask> loadPodcastLogoTasks = new HashMap<Podcast, LoadPodcastLogoTask>();
 
     /** The call-back set for the podcast list load listeners */
-    private Set<OnLoadPodcastListListener> loadPodcastListListeners = new HashSet<>();
+    private Set<OnLoadPodcastListListener> loadPodcastListListeners = new HashSet<OnLoadPodcastListListener>();
     /** The call-back set for the podcast list changed listeners */
-    private Set<OnChangePodcastListListener> changePodcastListListeners = new HashSet<>();
+    private Set<OnChangePodcastListListener> changePodcastListListeners = new HashSet<OnChangePodcastListListener>();
     /** The call-back set for the podcast load listeners */
-    private Set<OnLoadPodcastListener> loadPodcastListeners = new HashSet<>();
+    private Set<OnLoadPodcastListener> loadPodcastListeners = new HashSet<OnLoadPodcastListener>();
     /** The call-back set for the podcast logo load listeners */
-    private Set<OnLoadPodcastLogoListener> loadPodcastLogoListeners = new HashSet<>();
+    private Set<OnLoadPodcastLogoListener> loadPodcastLogoListeners = new HashSet<OnLoadPodcastLogoListener>();
 
     /** This is the background update task */
     private class PodcastUpdateTask extends TimerTask {
 
         @Override
         public void run() {
+            Log.i(getClass().getSimpleName(), "Running podcast background update");
+
             final boolean online = podcatcher.isOnline();
             // This is the current time minus the time to life for the podcast
             // minus some extra time to make sure we refresh before it if
@@ -154,6 +156,8 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
                             loadPodcastTasks.put(podcast, task);
                         } catch (RejectedExecutionException ree) {
                             // Skip update
+                            Log.d(getClass().getSimpleName(), "Cannot update podcast \"" + podcast
+                                    + "\"", ree);
                         }
                     }
                 }
@@ -207,38 +211,34 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     }
 
     @Override
-    public void onPodcastListLoaded(List<Podcast> list, Uri input) {
+    public void onPodcastListLoaded(List<Podcast> list) {
         // Set the member
         this.podcastList = list;
         this.podcastListChanged = false;
 
         // Put some nice sample podcasts for testing
-        // if (podcatcher.isInDebugMode())
-        // putSamplePodcasts();
+
+        putSamplePodcasts();
 
         // Alert call-backs (if any)
-        for (OnLoadPodcastListListener listener : loadPodcastListListeners)
-            listener.onPodcastListLoaded(getPodcastList(), input);
+        if (loadPodcastListListeners.isEmpty())
+            Log.w(getClass().getSimpleName(), "Podcast list loaded, but no listeners set.");
+        else
+            for (OnLoadPodcastListListener listener : loadPodcastListListeners)
+                listener.onPodcastListLoaded(getPodcastList());
 
         // Go load all podcast logo available offline
         for (Podcast podcast : podcastList)
             loadLogo(podcast, true);
 
         // Run podcast update task every five minutes
-        final int fiveMinutes = 1000 * 60 * 5;
+        final int fiveMinutes = 1000 * 60 * 60 * 5;
         final boolean isSelectAllOnStart = PreferenceManager.getDefaultSharedPreferences(
                 podcatcher.getApplicationContext()).getBoolean(
                 SettingsActivity.KEY_SELECT_ALL_ON_START, false);
         new Timer().schedule(new PodcastUpdateTask(),
                 isSelectAllOnStart || podcatcher.isInDebugMode() ?
                         fiveMinutes : 0, fiveMinutes);
-    }
-
-    @Override
-    public void onPodcastListLoadFailed(Uri inputFile, Exception error) {
-        // This should not happen, the app's private OPML file could not be
-        // read. We simply push an empty list and pretend things are fine.
-        onPodcastListLoaded(new ArrayList<Podcast>(), inputFile);
     }
 
     /**
@@ -257,7 +257,7 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
         // return copy in order to make sure
         // nobody changes this list on us.
         else
-            return new ArrayList<>(podcastList);
+            return new ArrayList<Podcast>(podcastList);
     }
 
     /**
@@ -293,6 +293,8 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
                 loadPodcastTasks.put(podcast, task);
             } catch (RejectedExecutionException ree) {
                 // Skip update TODO We might need a better solution here?
+                Log.d(getClass().getSimpleName(), "Cannot update podcast \"" + podcast
+                        + "\"", ree);
             }
         }
     }
@@ -325,11 +327,11 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     public void onPodcastLoaded(Podcast podcast) {
         // Remove from the map of loading task
         loadPodcastTasks.remove(podcast);
-        // Clear the failed count for this podcast
-        podcast.resetFailedLoadAttempts();
 
         // Notify listeners
-        if (blockExplicit && podcast.isExplicit())
+        if (loadPodcastListeners.isEmpty())
+            Log.w(getClass().getSimpleName(), "Podcast loaded, but no listeners attached.");
+        else if (blockExplicit && podcast.isExplicit())
             onPodcastLoadFailed(podcast, PodcastLoadError.EXPLICIT_BLOCKED);
         else
             for (OnLoadPodcastListener listener : loadPodcastListeners)
@@ -340,12 +342,13 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     public void onPodcastLoadFailed(Podcast podcast, PodcastLoadError code) {
         // Remove from the map of loading task
         loadPodcastTasks.remove(podcast);
-        // Increment the failed load attempt count
-        podcast.incrementFailedLoadAttempts();
 
         // Notify listeners
-        for (OnLoadPodcastListener listener : loadPodcastListeners)
-            listener.onPodcastLoadFailed(podcast, code);
+        if (loadPodcastListeners.isEmpty())
+            Log.w(getClass().getSimpleName(), "Podcast failed to load, but no listeners set.");
+        else
+            for (OnLoadPodcastListener listener : loadPodcastListeners)
+                listener.onPodcastLoadFailed(podcast, code);
     }
 
     /**
@@ -384,6 +387,8 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
                 loadPodcastLogoTasks.put(podcast, task);
             } catch (RejectedExecutionException ree) {
                 // Skip logo loading
+                Log.d(getClass().getSimpleName(), "Cannot load logo for podcast \"" + podcast
+                        + "\"", ree);
             }
         }
     }
@@ -392,16 +397,22 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     public void onPodcastLogoLoaded(Podcast podcast) {
         loadPodcastLogoTasks.remove(podcast);
 
-        for (OnLoadPodcastLogoListener listener : loadPodcastLogoListeners)
-            listener.onPodcastLogoLoaded(podcast);
+        if (loadPodcastLogoListeners.isEmpty())
+            Log.w(getClass().getSimpleName(), "Podcast logo loaded, but no listener set.");
+        else
+            for (OnLoadPodcastLogoListener listener : loadPodcastLogoListeners)
+                listener.onPodcastLogoLoaded(podcast);
     }
 
     @Override
     public void onPodcastLogoLoadFailed(Podcast podcast) {
         loadPodcastLogoTasks.remove(podcast);
 
-        for (OnLoadPodcastLogoListener listener : loadPodcastLogoListeners)
-            listener.onPodcastLogoLoadFailed(podcast);
+        if (loadPodcastLogoListeners.isEmpty())
+            Log.w(getClass().getSimpleName(), "Podcast logo failed to load, but no listener set.");
+        else
+            for (OnLoadPodcastLogoListener listener : loadPodcastLogoListeners)
+                listener.onPodcastLogoLoadFailed(podcast);
     }
 
     /**
@@ -410,25 +421,25 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
      * already is in the list, it will not be added and no notification takes
      * place.
      * 
-     * @param newPodcast Podcast to add. Given <code>null</code> will make the
-     *            method return without any action.
+     * @param newPodcast Podcast to add.
      * @see OnChangePodcastListListener
      */
     public void addPodcast(Podcast newPodcast) {
-        if (newPodcast != null)
-            // Check whether the new podcast is already added
-            if (!contains(newPodcast)) {
-                // Add the new podcast
-                podcastList.add(newPodcast);
-                Collections.sort(podcastList);
+        // Check whether the new podcast is already added
+        if (newPodcast != null && !contains(newPodcast)) {
+            // Add the new podcast
+            podcastList.add(newPodcast);
+            Collections.sort(podcastList);
 
-                // Alert listeners of new podcast
-                for (OnChangePodcastListListener listener : changePodcastListListeners)
-                    listener.onPodcastAdded(newPodcast);
+            // Alert listeners of new podcast
+            for (OnChangePodcastListListener listener : changePodcastListListeners)
+                listener.onPodcastAdded(newPodcast);
 
-                // Mark podcast list dirty
-                podcastListChanged = true;
-            }
+            // Mark podcast list dirty
+            podcastListChanged = true;
+        } else
+            Log.i(getClass().getSimpleName(), "Podcast \"" + newPodcast.getName()
+                    + "\" is already in list.");
     }
 
     /**
@@ -450,7 +461,9 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
 
             // Mark podcast list dirty
             podcastListChanged = true;
-        }
+        } else
+            Log.w(getClass().getSimpleName(), "Attempted to remove podcast at invalid position: "
+                    + index);
     }
 
     /**
@@ -487,9 +500,9 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     public void saveState() {
         // Store podcast list if dirty
         if (podcastListChanged && podcastList != null) {
-            final StorePodcastListTask task = new StorePodcastListTask(podcatcher, null);
+            final StorePodcastListTask task = new StorePodcastListTask(podcatcher);
             task.setWriteAuthorization(true);
-            task.execute(new ArrayList<>(podcastList));
+            task.execute(new ArrayList<Podcast>(podcastList));
 
             // Reset the flag, so the list will only be saved if changed again
             podcastListChanged = false;
@@ -565,35 +578,6 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
                 for (Episode episode : podcast.getEpisodes())
                     if (episode.getMediaUrl().equals(url))
                         return episode;
-        }
-
-        return null;
-    }
-
-    /**
-     * Find the episode object for given URL in the podcast given. Note that
-     * this will only search episodes currently loaded.
-     * 
-     * @param episodeUrl URL of episode to look for.
-     * @param podcastUrl URL of the podcast to look in.
-     * @return The episode object, or <code>null</code> if not found.
-     */
-    public Episode findEpisodeForUrl(String episodeUrl, String podcastUrl) {
-        // Make sure search only runs once the podcast list is actually
-        // available.
-        if (podcastList != null && episodeUrl != null) {
-            // No podcast info given, use regular method
-            if (podcastUrl == null)
-                return findEpisodeForUrl(episodeUrl);
-            else {
-                final Podcast podcast = findPodcastForUrl(podcastUrl);
-
-                // Go try find the episode
-                if (podcast != null)
-                    for (Episode episode : podcast.getEpisodes())
-                        if (episode.getMediaUrl().equals(episodeUrl))
-                            return episode;
-            }
         }
 
         return null;
@@ -731,24 +715,8 @@ public class PodcastManager implements OnLoadPodcastListListener, OnLoadPodcastL
     private void putSamplePodcasts() {
         podcastList.clear();
 
-        podcastList.add(new Podcast("This American Life",
-                "http://feeds.thisamericanlife.org/talpodcast"));
-        podcastList.add(new Podcast("Radiolab",
-                "http://feeds.wnyc.org/radiolab"));
-        podcastList.add(new Podcast("Linux' Outlaws",
-                "http://feeds.feedburner.com/linuxoutlaws"));
-        podcastList.add(new Podcast("GEO",
-                "http://www.geo.de/GEOaudio/index.xml"));
-        podcastList.add(new Podcast("SGU",
-                "https://www.theskepticsguide.org/premium"));
-        podcastList.add(new Podcast("Planet Money",
-                "http://www.npr.org/rss/podcast.php?id=510289"));
-        podcastList.add(new Podcast("Freakonomics",
-                "http://feeds.feedburner.com/freakonomicsradio"));
-        podcastList.add(new Podcast("neo",
-                "http://www.zdf.de/ZDFmediathek/podcast/1446344?view=podcast"));
-        podcastList.add(new Podcast("Little Letter for Gaelic Learners",
-                "http://downloads.bbc.co.uk/podcasts/scotland/litirbheag/rss.xml"));
+        podcastList.add(new Podcast("your podcast title",
+                "your podcast link here"));
 
         Collections.sort(podcastList);
     }
